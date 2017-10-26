@@ -7,7 +7,7 @@ import os, sys
 import requests
 import json
 import subprocess
-
+import logging
 
 BaseURL = "http://0.0.0.0:8080"
 
@@ -16,45 +16,53 @@ class Task(object):
     '''
     Main class to encapsulate task operations and data
     '''
-    GetTaskURL = '{}/get_task'.format(BaseURL)
-    EndTaskURL = '{}/end_task?task_id={}'.format(BaseURL,'{}')
-    DownloadInputURL = '{}/input/{}'.format(BaseURL,'{}')
-    UploadOutputURL = '{}/output/{}'.format(BaseURL,'{}')
+    GetTaskURL = ''
+    EndTaskURL = ''
+    DownloadInputURL = ''
+    UploadOutputURL = ''
 
     RunExternalProcessor = True
 
     def __init__(self):
         self.task_data = None
+        self.GetTaskURL = '{}/get_task'.format(BaseURL)
+        self.EndTaskURL = '{}/end_task?task_id={}'.format(BaseURL, '{}')
+        self.DownloadInputURL = '{}/input/{}'.format(BaseURL, '{}')
+        self.UploadOutputURL = '{}/output/{}'.format(BaseURL, '{}')
+
+        logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s',
+                            level=logging.DEBUG)
+
         try:
             os.stat('./tasks')
         except:
             os.mkdir('./tasks')
 
     def get_task_params(self):
-        r = requests.get(url=Task.GetTaskURL)
+        r = requests.get(url=self.GetTaskURL)
         if not r.status_code == requests.codes.ok:
-            print "Couldn't get task parameters"
+            logging.error("Couldn't get task parameters")
             exit(-1)
         self.task_data = r.json()
         self.task_id = self.task_data['task_id']
         self.in_file = self.task_data['in_file']
         self.out_file = self.task_data['out_file']
         self.log_file = self.task_data['log_file']
-        print "\n\nTASK {}".format(self.task_id)
-        print json.dumps(self.task_data)
+        logging.info("TASK {}".format(self.task_id))
+        logging.debug(json.dumps(self.task_data))
 
     def setup_env(self):
         try:
-            print "- Setting up task environment"
+            logging.info("- Setting up task environment")
             self.task_folder = './tasks/{}'.format(self.task_id)
             for fld in ['{}/{}'.format(self.task_folder,x) for x in ['', 'in', 'out', 'log']]:
                 os.mkdir(fld)
         except:
-            print 'Cannot create folders for task {}'.format(self.task_id)
+            logging.info('Cannot create folders for task {}'.format(self.task_id))
 
     def download_inputs(self):
-        print "- Downloading input file {}".format(self.in_file)
-        input_file_url = Task.DownloadInputURL.format(self.in_file)
+        logging.info("- Downloading input file {}".format(self.in_file))
+        input_file_url = self.DownloadInputURL.format(self.in_file)
         self.local_input_file = '{}/in/{}'.format(self.task_folder, self.in_file)
         self.local_output_file = '{}/out/{}'.format(self.task_folder, self.out_file)
         self.local_log_file = '{}/log/{}'.format(self.task_folder, self.log_file)
@@ -70,7 +78,7 @@ class Task(object):
                                                                 self.local_log_file)
 
         cmdline = '{} {}'.format(script, argmts)
-        print '  > {}'.format(cmdline)
+        logging.debug('Executing: $ {}'.format(cmdline))
         return cmdline
 
     def run_external_processor(self):
@@ -90,10 +98,10 @@ class Task(object):
         just a dummy processing is done.
         :return:
         '''
-        print "- Start processing . . ."
+        logging.info("- Start processing . . .")
         start_time = time()
 
-        if Task.RunExternalProcessor:
+        if self.RunExternalProcessor:
             self.run_external_processor()
         else:
             os.system('od -xao {} > {}'.format(self.local_input_file, self.local_output_file))
@@ -105,27 +113,27 @@ class Task(object):
             sys.stdout.flush()
 
         elapsed_time = time() - start_time
-        print "- Done.\n- Execution time: {0:.2f} s".format(elapsed_time)
+        logging.info("- Done.\n- Execution time: {0:.2f} s".format(elapsed_time))
         with open(self.local_log_file, 'w') as flog:
             flog.write('Execution time: {0:.2f} s'.format(elapsed_time))
 
     def upload_file(self, url, local_file):
-        print "- Uploading output file {}".format(local_file)
+        logging.info("- Uploading output file {}".format(local_file))
         files = {'file': open(local_file, 'rb')}
         r = requests.post(url, files=files)
         if not r.status_code == requests.codes.ok:
-            print "Couldn't upload file ".format(local_file)
+            logging.warning("  !!! Couldn't upload file ".format(local_file))
 
     def upload_outputs(self):
-        self.upload_file(Task.UploadOutputURL.format(''), self.local_output_file)
-        self.upload_file(Task.UploadOutputURL.format(''), self.local_log_file)
+        self.upload_file(self.UploadOutputURL.format(''), self.local_output_file)
+        self.upload_file(self.UploadOutputURL.format(''), self.local_log_file)
 
     def notify_end_of_task(self):
-        print "- Notifying end of task"
-        end_task_url = Task.EndTaskURL.format(self.task_id)
+        logging.info("- Notifying end of task")
+        end_task_url = self.EndTaskURL.format(self.task_id)
         r = requests.get(url=end_task_url)
         if not r.status_code == requests.codes.ok:
-            print "Couldn't get task parameters"
+            logging.error("  !!! Couldn't get task parameters")
             exit(-1)
 
     def run(self):
