@@ -15,7 +15,12 @@ import subprocess
 import logging
 
 
-__author__ = 'jcgonzalez' # QDT fake
+VERSION = '0.1.0'
+
+__author__ = "jcgonzalez"
+__version__ = VERSION
+__email__ = "jcgonzalez@sciops.esa.int"
+__status__ = "Prototype" # Prototype | Development | Production
 
 
 # Change INFO for DEBUG to get debug messages
@@ -57,7 +62,17 @@ class Processor(object):
     # Framework environment related variables
     Home = os.environ['HOME']
 
-    QPFWorkArea = "/Users/jcgonzalez/ws/QPF/processors/WA"  # Home + "/qpf"
+    if "QPFWA" in os.environ:
+        # Nominally, the QPFWA env. variable should point to the QPF Working Area
+        # main directory (usually /home/eucops/qpf)
+        QPFWorkArea = os.environ["QPFWA"]
+    else:
+        # Otherwise, this module is expected to be found in QPFWA/run/bin/qpfproc
+        # folder, so if QPFWA is not set, we use this fact to presume the WA
+        # folder
+        mod_fullpath = os.path.abspath(__file__)
+        mod_dir = os.path.dirname(mod_fullpath)
+        QPFWorkArea = os.path.dirname(os.path.dirname(os.path.dirname(mod_dir)))
 
     QPFRunPath = QPFWorkArea + "/run"
     QPFRunToolsPath = QPFWorkArea + "/run/bin"
@@ -138,9 +153,25 @@ class Processor(object):
         with open(self.cfg_file) as json_data:
             self.cfg = json.load(json_data)
 
+        # Create additional folders for processor execution
+        self.in_dir = self.task_dir + "/in"
+        self.log_dir = self.task_dir + "/log"
+        self.out_dir = self.task_dir + "/out"
+        for a_dir in [self.in_dir, self.log_dir, self.out_dir]:
+            if not os.path.exists(a_dir):
+                os.makedirs(a_dir)
+
+        os.chdir(self.task_dir)
+
         # Evaluate configuration entries
         # 1. Input file(s), Outputs and Log
+        logging.debug(self.cfg['input'])
         self.input = glob.glob(self.cfg["input"])
+        logging.debug(self.input)
+        if len(self.input) < 1:
+            logging.fatal("This processor needs some input files to analyze")
+            os._exit(1)
+
         self.output = self.cfg["output"]
         self.log = self.cfg["log"]
         # 2. Processor subfolder name (folder under QPF_WA/bin/"
@@ -170,9 +201,10 @@ class Processor(object):
         #                                  ','.join(self.log),
         #                                  self.args)))
         entries = self.cfg.copy()
-        entries.update({'input': ','.join(self.input),
-                        'output': ','.join(self.output),
-                        'log': ','.join(self.log)})
+        entry_in  = ','.join(self.input)  if isinstance(self.input, (list, tuple))  else self.input
+        entry_out = ','.join(self.output) if isinstance(self.output, (list, tuple)) else self.output
+        entry_log = ','.join(self.log)    if isinstance(self.log, (list, tuple))    else self.log
+        entries.update({'input': entry_in, 'output': entry_out, 'log': entry_log})
         for kitem, vitem in entries.iteritems():
             self.args = re.sub('{' + kitem + '}', str(vitem), self.args)
 
@@ -180,14 +212,6 @@ class Processor(object):
 
         for cfg_item in ['input', 'output', 'log']:
             logging.debug("%s: %s", cfg_item, self.__dict__[cfg_item])
-
-        # Create additional folders for processor execution
-        self.in_dir = self.task_dir + "/in"
-        self.log_dir = self.task_dir + "/log"
-        self.out_dir = self.task_dir + "/out"
-        for a_dir in [self.in_dir, self.log_dir, self.out_dir]:
-            if not os.path.exists(a_dir):
-                os.makedirs(a_dir)
 
         # Prepare Docker folder mapping, just in case...
         self.task_dir_img = Processor.QPFDckImageRunPath + "/" + self.task_id
